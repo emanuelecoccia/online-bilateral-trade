@@ -46,11 +46,20 @@ class OrderBookEnvironment(DummyEnvironment):
 
         return valuation_sequence
 
-    def get_constraints(self, index)->np.ndarray:
+    def get_constraints(self, index:int)->np.ndarray:
         """
         This function returns the constraints at the given time.
         """
         return self.order_book[index]
+    
+    def get_policy_gft_having_adhoc_valuations(self)->float:
+        """
+        This function calculates the policy regret when the valuations are deterministic
+        and already account for the Lipschitnezz of the policy.
+        So we just need to sum the GFT of each turn. 
+        BEWARE: we assume that the valuations have the constraint that b >= s.
+        """
+        return np.sum(self.valuation_sequence[:, 1] - self.valuation_sequence[:, 0])
     
     def get_policy_gft(self)->Union[dict, float]:
         """
