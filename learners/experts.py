@@ -1,4 +1,18 @@
 import numpy as np
+from environments.base import DummyEnvironment
+from typing import List
+from tqdm import tqdm
+
+class DummyAlgorithm:
+    def __init__(self, T:int, environment:DummyEnvironment)->None:
+        self.T = T
+        self.environment = environment
+
+    def run(self)->None:
+        pass
+
+    def get_final_gft(self)->float:
+        return 0
 
 class Hedge:
     def __init__(self, experts:list, T:int):
@@ -54,11 +68,11 @@ class Hedge:
         best_expert_index = np.argmax(self.gft)
         return self.experts[best_expert_index], self.gft[best_expert_index]
 
-class GFTMax:
+class GFTMax(DummyAlgorithm):
     """
     Use this class only once for each run.
     """
-    def __init__(self, T, environment):
+    def __init__(self, T:int, environment:DummyEnvironment)->None:
         self.budget = 0
         self.gft = 0
         self.budget_threshold = np.sqrt(T)
@@ -66,8 +80,8 @@ class GFTMax:
         self.T = T
         self.environment = environment
         self.run_profit_max = True
-        self.price_grid_F:list = self.create_multiplicative_grid(self.K)
-        self.price_grid_H:list = self.create_additive_grid(self.K)
+        self.price_grid_F:List = self.create_multiplicative_grid(self.K)
+        self.price_grid_H:List = self.create_additive_grid(self.K)
         self.hedge_profit = Hedge(self.price_grid_F, self.T)
         self.hedge_gft = Hedge(self.price_grid_H, self.T)
 
@@ -189,3 +203,50 @@ class ConstrainedGFTMax(GFTMax):
         self.update_budget(action, feedback)
         # Update gft
         self.update_gft(action, feedback)
+
+
+class EstimateDeterministicLipschitzValuations(DummyAlgorithm):
+    def __init__(self, T:int, environment:DummyEnvironment, L:float)->None:
+        self.T = T
+        self.environment = environment
+        self.L = L
+        self.gft = 0
+
+    def get_final_gft(self):
+        return self.gft
+
+    def run(self):
+        # For the first round, just guess (0.5, 0.5)
+        feedback = self.environment.get_valuations(0)
+        if feedback[0] <= 0.5 and 0.5 <= feedback[1]:
+            self.gft += feedback[1] - feedback[0]
+
+        for i in tqdm(range(1, self.T)):
+            constraints = self.environment.get_constraints(i)
+            # Find the distance of previous constraints to the current constraints
+            past_constraints = self.environment.order_book[:i]
+            distances = np.sqrt(np.sum((past_constraints - constraints)**2, axis = 1))
+            # Retrieve the past valuations and create upper and lower bounds
+            past_valuations = self.environment.valuation_sequence[:i]
+            lower_bound_s = np.max(past_valuations[:, 0] - self.L * distances)
+            upper_bound_s = np.min(past_valuations[:, 0] + self.L * distances)
+            lower_bound_b = np.max(past_valuations[:, 1] - self.L * distances)
+            upper_bound_b = np.min(past_valuations[:, 1] + self.L * distances)
+            # Take the point in the middle of the bounds, whether they cross or not
+            p = (upper_bound_s + lower_bound_b) / 2
+            q = p
+            # Get valuations from the environment
+            feedback = self.environment.get_valuations(i)
+            # Update gft
+            if feedback[0] <= p and q <= feedback[1]:
+                self.gft += feedback[1] - feedback[0]
+            
+            # Check if the valuations are within the bounds
+            if feedback[0] < lower_bound_s:
+                print("Valuation s is below the lower bound")
+            if upper_bound_s < feedback[0]:
+                print("Valuation s is above the upper bound")
+            if feedback[1] < lower_bound_b:
+                print("Valuation b is below the lower bound")
+            if upper_bound_b < feedback[1]:
+                print("Valuation b is above the upper bound")
