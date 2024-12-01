@@ -1,2 +1,2 @@
 linear_bandits/
-**/*cpython*
+*.pyc
