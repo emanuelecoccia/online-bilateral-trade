@@ -1,26 +1,38 @@
 import numpy as np
 import pandas as pd
-from .base import DummyEnvironment
+from .base import BaseEnvironment, SimpleBilateralEnvironment
 from typing import Union
 
-class OrderBookEnvironment(DummyEnvironment):
+class ContextualEnvironment(BaseEnvironment):
+    def __init__(self)->None:
+        self.order_book = NotImplemented
+        super().__init__() # will raise NotImplementedError
+
+    def get_context(self)->tuple[float, float]:
+        raise NotImplementedError
+
+class OrderBookEnvironment(ContextualEnvironment, SimpleBilateralEnvironment):
     def __init__(self, T:int, order_book:Union[np.ndarray, None]=None, valuation_sequence:Union[np.ndarray, None]=None)->None:
         """
         This class adds the order book to the DummyEnvironment.
         The order book is a sequence of constraints on the private valuations.
         It is best to input the order book and the valuation sequence as numpy arrays.
         """
-        self.T = T
+        self.T:int = T
         if order_book is None:
-            self.order_book = self.construct_order_book()
+            self.order_book:np.ndarray = self.construct_order_book()
         else:
-            self.order_book = order_book
+            self.order_book:np.ndarray = order_book
         if valuation_sequence is None:
-            self.valuation_sequence = self.construct_valuation_sequence()
+            self.valuation_sequence:np.ndarray = self.construct_valuation_sequence()
         else:
-            self.valuation_sequence = valuation_sequence
+            self.valuation_sequence:np.ndarray = valuation_sequence
 
     def construct_order_book(self)->np.ndarray:
+        """
+        This is a simple function that generates an order book by sampling at random 
+        points (0, 1/4), (3/4, 1) from a bernoulli distribution.
+        """
         # Sample at random points (0, 1/4), (3/4, 1) from a bernoulli distribution
         left_point = np.array([0, 1/4])
         right_point = np.array([3/4, 1])
@@ -30,6 +42,9 @@ class OrderBookEnvironment(DummyEnvironment):
         return order_book
 
     def construct_valuation_sequence(self)->np.ndarray:
+        """
+        This function constructs a sequence of valuations inside the constraints of the order book.
+        """
         # Sample at random points (0, 1/4), (3/4, 1) from a bernoulli distribution
         # and rescale them to be inside the constraints sequence
         left_point = np.array([0, 1/4])
@@ -46,7 +61,7 @@ class OrderBookEnvironment(DummyEnvironment):
 
         return valuation_sequence
 
-    def get_constraints(self, index:int)->np.ndarray:
+    def get_context(self, index:int)->np.ndarray:
         """
         This function returns the constraints at the given time.
         """
@@ -61,12 +76,13 @@ class OrderBookEnvironment(DummyEnvironment):
         """
         return np.sum(self.valuation_sequence[:, 1] - self.valuation_sequence[:, 0])
     
-    def get_policy_gft(self)->Union[dict, float]:
+    def get_policy_gft(self)->tuple[dict, float]:
         """
         This function computes the aggregated reward on the unit square and returns it.
         We assume that the policy is able to follow precisely the valuation sequence 
         (Lipschitz constraints are the same for the policy and for the valuation sequence,
         the best expert in each context is also the output of the optimal policy).
+        This means that for each context, the policy is able to choose the best price pair. 
         """
         # For each context, the policy chooses the best price pair
         # Work with pandas for easier sorting
@@ -92,50 +108,57 @@ class OrderBookEnvironment(DummyEnvironment):
             # Get sorted group keys in descending order
             sorted_keys = sorted(grouped.groups.keys(), reverse=True)
 
-            prev_curr_rewards = []
-            max_reward = 0
-            max_reward_tuple = (0, 0)
+            prev_curr_rewards:list[tuple[float, float]] = []
+            max_reward:float = 0
+            max_reward_tuple:tuple[float, float] = (0, 0)
 
             for b in sorted_keys:
                 group = grouped.get_group(b)
-                reward_index = 0
-                baseline_reward = 0
-                reward_max_index = len(prev_curr_rewards) - 1 
-                curr_rewards = []
+                reward_index:int = 0
+                cumulative_reward:float = 0 
+                reward_max_index:int = len(prev_curr_rewards) - 1 
+                # contains (s, reward). The first element is a fake reward at s=0
+                curr_rewards:list[tuple[float, float]] = [(0, 0)] 
 
                 # Iterate through the s values
                 for s in group['s']:
-                    if prev_curr_rewards: # if the list is not empty
-                        # Swipe through prev_s < s
-                        while reward_index <= reward_max_index:
-                            s_prev, reward_prev = prev_curr_rewards[reward_index]
-                            if s > s_prev:
-                                new_reward = reward_prev + baseline_reward
-                                # Append the curr_rewards before s
-                                curr_rewards.append((s_prev, new_reward))
-                                reward_index += 1
-                                # Update max reward
-                                if new_reward > max_reward:
-                                    max_reward = new_reward
-                                    max_reward_tuple = (s_prev, b)
-                            elif s == s_prev:
-                                if reward_index > 0:
-                                    baseline_reward += reward_prev - prev_curr_rewards[reward_index-1][1]
-                                else:
-                                    baseline_reward += reward_prev
+                    # Swipe through prev_s < s
+                    # Keep in mind that "prev" here refers to the previous b value
+                    while prev_curr_rewards and reward_index <= reward_max_index:
+                        s_prev, reward_prev = prev_curr_rewards[reward_index]
+                        if s_prev < s:
+                            new_reward = reward_prev + cumulative_reward
+                            # Append the curr_rewards before s
+                            curr_rewards.append((s_prev, new_reward))
+                            # Update index
+                            reward_index += 1
+                            # Update max reward
+                            if new_reward > max_reward:
+                                max_reward = new_reward
+                                max_reward_tuple = (s_prev, b)
+                        elif s == s_prev:
+                            # Add the delta in reward of the s values associated with the previous b
+                            if reward_index > 0:
+                                cumulative_reward += reward_prev - prev_curr_rewards[reward_index-1][1]
                             else:
-                                break
+                                cumulative_reward += reward_prev
+                            # Update index
+                            reward_index += 1
+                        else:
+                            break
 
                     # Increment the baseline reward with the current s
-                    baseline_reward += b-s
-                    # If the current s is the same as the previous s, update the reward
+                    cumulative_reward += b-s
+                    # If the current s is the same as the previous s, update the reward directly in the list
                     if curr_rewards and s == curr_rewards[-1][0]:
-                        curr_rewards[-1] = (s, baseline_reward)
-                    else:
+                        reward_s = cumulative_reward
+                        curr_rewards[-1] = (s, reward_s)
+                    else: # Calculate the reward
                         if prev_curr_rewards:
-                            reward_s  = prev_curr_rewards[reward_index][1] + baseline_reward
+                            # Add the reward baseline to the previous reward (hence the need of the fake reward at s=0)
+                            reward_s = cumulative_reward + prev_curr_rewards[min(reward_index, reward_max_index)][1]
                         else:
-                            reward_s = baseline_reward
+                            reward_s = cumulative_reward
                         curr_rewards.append((s, reward_s))
                     # Update max reward
                     if reward_s > max_reward:
@@ -143,21 +166,21 @@ class OrderBookEnvironment(DummyEnvironment):
                         max_reward_tuple = (s, b)
 
                 # Swipe through prev_s > s if prev_s < b
-                if prev_curr_rewards:
-                    while reward_index <= reward_max_index:
-                        s_prev, reward_prev = prev_curr_rewards[reward_index]
-                        if reward_index <= reward_max_index and s_prev <= b:
-                            new_reward = reward_prev + baseline_reward
-                            curr_rewards.append((s_prev, new_reward))
-                            reward_index += 1
-                            # Update max reward
-                            if new_reward > max_reward:
-                                max_reward = new_reward
-                                max_reward_tuple = (s_prev, b)
-                        else:
-                            break
+                while prev_curr_rewards and reward_index <= reward_max_index:
+                    s_prev, reward_prev = prev_curr_rewards[reward_index]
+                    if reward_index <= reward_max_index and s_prev <= b:
+                        # Append s_prev to vector of rewards
+                        new_reward = reward_prev + cumulative_reward
+                        curr_rewards.append((s_prev, new_reward))
+                        # Update index
+                        reward_index += 1
+                        # Update max reward
+                        if new_reward > max_reward:
+                            max_reward = new_reward
+                            max_reward_tuple = (s_prev, b)
+                    else:
+                        break
                 
-                # print(curr_rewards) # Debugging
                 prev_curr_rewards = curr_rewards
 
             # Add the max reward to the cumulative max reward
