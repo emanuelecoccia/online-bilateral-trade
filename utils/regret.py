@@ -1,47 +1,75 @@
 import numpy as np
 import pandas as pd
-from environments.base import DummyEnvironment
-from learners.experts import GFTMax, DummyAlgorithm
+from environments.base import BaseEnvironment
+from environments.contextual import ContextualEnvironment
+from learners.experts import BaseAlgorithm
 from .valuations import construct_sequence_with_lipschitz_valuations
 from typing import Tuple, List
 from tqdm import tqdm
 
-def compute_scaling_laws(Algorithm:DummyAlgorithm, Environment:DummyEnvironment, *args, **kwargs)\
-    ->Tuple[np.ndarray, List[float]]:
+def compute_scaling_laws(
+        Algorithm:BaseAlgorithm, Environment:BaseEnvironment, 
+        T_horizons:list[int], *args, **kwargs
+        )->Tuple[list[int], list[float]]:
     """
     This function computes the regret of an algorithm given an environment,
     at different time horizons T.
-    Possible kwargs: policy_regret, adhoc_valuations.
     """
-    T_values = np.linspace(10000, 100000, 10, dtype=int, endpoint=True)
-    L_values = [100] #np.logspace(1, 10, 10, dtype=int, endpoint=True)
     regret_values = []
-    for T in T_values:
-        for L in tqdm(L_values):
+    for T in T_horizons:
+        # Create environment based on variables found
+        environment = Environment(T)
+
+        # Create algorithm
+        algorithm = Algorithm(T, environment)
+        algorithm.run()
+        algo_gft = algorithm.get_final_gft()
+
+        # Calculate the regret based on the settings
+        _, max_gft = environment.get_best_expert()
+        regret = max_gft - algo_gft
+        regret_values.append(regret)
+
+    return T_horizons, regret_values
+
+def compute_scaling_laws_with_policy_regret(
+        Algorithm:BaseAlgorithm, Environment:ContextualEnvironment, 
+        T_horizons:list[int], Lipschitz_constants:list[float], sequence_constructor=None,
+        adhoc_valuations:bool=True, *args, **kwargs
+        )->Tuple[list[int], list[int], list[list[float]]]:
+    """
+    This function computes the regret of an algorithm given an environment,
+    at different time horizons T and Lipschitz constants L.
+    We presume that the valuations are built ad-hoc, so that for each context
+    there is only one pair of valuations and the valuation sequence is Lipschitz just like the policy.
+    In the opposite case, for one context there are multiple pairs of valuations
+    and the optimal policy is able to choose the best one.
+    """
+    regret_values = []
+    for T in T_horizons:
+        regret_values_for_T = []
+        for L in Lipschitz_constants:
             # Create environment based on variables found
-            if kwargs.get("policy_regret", False) and kwargs.get("adhoc_valuations", False):
-                contexts, valuations = construct_sequence_with_lipschitz_valuations(T, L)
+            if sequence_constructor:
+                # Construct the sequence of valuations from the given constructor
+                contexts, valuations = sequence_constructor(T, L)
                 environment = Environment(T, contexts, valuations)
             else:
                 environment = Environment(T)
 
             # Create algorithm
-            if kwargs.get("policy_regret", False) and kwargs.get("adhoc_valuations", False):
-                algorithm = Algorithm(T, environment, L)
-            else:
-                algorithm = Algorithm(T, environment)
+            algorithm = Algorithm(T, environment, L)
             algorithm.run()
             algo_gft = algorithm.get_final_gft()
 
             # Calculate the regret based on the settings
-            if kwargs.get("policy_regret", False):
-                if kwargs.get("adhoc_valuations", False):
-                    max_gft = environment.get_policy_gft_having_adhoc_valuations() # faster computation
-                else:
-                    _, max_gft = environment.get_policy_gft()
+            if adhoc_valuations:
+                max_gft = environment.get_policy_gft_having_adhoc_valuations()
             else:
-                _, max_gft = environment.get_best_expert()
+                _, max_gft = environment.get_policy_gft()
             regret = max_gft - algo_gft
-            regret_values.append(regret)
+            regret_values_for_T.append(regret)
+        
+        regret_values.append(regret_values_for_T)
 
-    return T_values, L_values, regret_values
+    return T_horizons, Lipschitz_constants, regret_values
