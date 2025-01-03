@@ -324,7 +324,7 @@ class EDLV(BaseAlgorithm):
             context:np.ndarray[float, float] = self.environment.get_context(i)
             # Find the distance of previous context to the current context
             past_context:np.ndarray = self.environment.order_book[:i]
-            distances:np.ndarray = np.sqrt(np.sum((past_context - context)**2, axis = 1))
+            distances:np.ndarray = np.sum(np.abs(past_context - context), axis = 1) # l1
             # Retrieve the past valuations and create upper and lower bounds
             past_valuations:np.ndarray = self.environment.valuation_sequence[:i]
             lower_bound_s:float = np.max(past_valuations[:, 0] - self.L * distances)
