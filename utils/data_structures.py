@@ -85,14 +85,13 @@ class TwoDimensionalTree:
         # Compute squared distance between node and query point
         dx = node.x - x
         dy = node.y - y
-        dist_sq = dx * dx + dy * dy
-        radius_sq = radius ** 2 # no need to take the square root
+        dist = abs(dx) + abs(dy)
 
         # If the node is within the radius, 
         # update its information and add it to the result
-        if dist_sq <= radius_sq:
+        if dist <= radius:
             node.temporary_distance["current_iteration"] = current_iteration
-            node.temporary_distance["distance"] = np.sqrt(dist_sq)
+            node.temporary_distance["distance"] = dist
             result.append(node)
 
         # Arguments for the recursive calls
@@ -151,7 +150,7 @@ class TwoDimensionalTree:
         # Compute distance from current node to the target point
         dx = node.x - x
         dy = node.y - y
-        dist = np.sqrt(dx * dx + dy * dy)
+        dist = abs(dx) + abs(dy)
 
         # Update the best node if this one is closer
         if dist < best['distance']:
