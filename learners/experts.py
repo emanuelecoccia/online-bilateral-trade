@@ -438,7 +438,7 @@ class FastEDLV(EDLV):
             else:
                 # If there are no close nodes, we just guess the central point on the diagonal
                 # and update the current GFT based on the feedback
-                action = (context[0] + context[1]) / 2
+                action:float = (context[0] + context[1]) / 2
                 feedback:np.ndarray[float, float] = self.environment.get_valuations(i)
                 if feedback[0] <= action and action <= feedback[1]:
                     self.gft += feedback[1] - feedback[0]
@@ -513,3 +513,51 @@ class FastEDLV2(EDLV):
             if upper_bound_b < feedback[1]:
                 print("Valuation b is above the upper bound")
                 print(f"Hidden b:{feedback[1]}, upper bound: {upper_bound_b}\n")
+
+
+class PartitionedContexts(BaseAlgorithm):
+    """
+    This algorithm partitions the context space into smaller regions.
+    Each context is assigned to a region.
+    The first time we observe a context in a specific region (exploration round), 
+    we save the corresponding valuations for the future exploitation rounds.
+    """
+    def __init__(self, T:int, environment:ContextualEnvironment, L:float, *args, **kwargs)->None:
+        self.T:int = T
+        self.environment:ContextualEnvironment = environment
+        self.L:float = L
+        self.epsilon = self.L**(2/3) * self.T**(-1/3)
+        self.grid_size = np.ceil(self.L/self.epsilon)
+        self.L_grid:np.ndarray[float] = - np.ones((self.grid_size, self.grid_size)) # -1 means no data
+        self.gft:float = 0
+
+    def get_final_gft(self)->float:
+        return self.gft
+    
+    def run(self)->None:
+        for i in tqdm(range(self.T)):
+            # Get the context
+            context:np.ndarray[float, float] = self.environment.get_context(i)
+            # Find the region
+            region:np.ndarray[int, int] = np.floor(context * self.grid_size).astype(int)
+            # If the region has no data, we save 
+            # the orthogonal projection of the valuations
+            # onto the main diagonal
+            action:float = self.L_grid[region]
+            if action == -1:
+                # Guess the action by projecting the context onto the main diagonal
+                action:float = (context[0] + context[1]) / 2
+                # Get feedback
+                feedback:np.ndarray[float, float] = self.environment.get_valuations(i)
+                # Project the actual valuations onto the main diagonal
+                projection:float = (feedback[0] + feedback[1]) / 2
+                # Save them
+                self.L_grid[region] = projection
+                # Update gft
+                if feedback[0] <= action and action <= feedback[1]:
+                    self.gft += feedback[1] - feedback[0]
+            # If the region has data already, we exploit it
+            else:
+                feedback:np.ndarray[float, float] = self.environment.get_valuations(i)
+                if feedback[0] <= action and action <= feedback[1]:
+                    self.gft += feedback[1] - feedback[0]
