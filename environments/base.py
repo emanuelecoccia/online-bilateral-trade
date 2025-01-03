@@ -6,7 +6,28 @@ class BaseEnvironment:
         self.valuation_sequence = NotImplemented
         raise NotImplementedError
     
-    def get_valuations(self)->np.ndarray[float, float]:
+    def get_valuations(self, index:int)->np.ndarray[float, float]:
+        """
+        This function returns the valuations at the given index.
+        """
+        raise NotImplementedError
+    
+    def get_two_bits_feedback(self, index:int, action:tuple[float, float])->np.ndarray[bool, bool]:
+        """
+        This function returns the two-bits feedback at the given index and action.
+        """
+        raise NotImplementedError
+    
+    def get_one_bit_feedback(self, index:int, action:tuple[float, float])->bool:
+        """
+        This function returns the one-bit feedback at the given index and action.
+        """
+        raise NotImplementedError
+    
+    def get_turn_gft(self, index:int)->float:
+        """
+        This function computes the GFT at the given index.
+        """
         raise NotImplementedError
 
 class SimpleBilateralEnvironment(BaseEnvironment):
@@ -28,9 +49,26 @@ class SimpleBilateralEnvironment(BaseEnvironment):
         valuation_sequence:np.ndarray = points[valuation_sequence_indices]
         return valuation_sequence
     
-    def get_valuations(self, index)->np.ndarray:
+    def get_valuations(self, index:int)->np.ndarray:
         # Return the valuations corresponding to the index
         return self.valuation_sequence[index]
+    
+    def get_two_bits_feedback(self, index:int, action:np.ndarray[float, float])->np.ndarray:
+        # Return the feedback corresponding to the action (for now p=q)
+        valuations:np.ndarray = self.get_valuations(index)
+        feedback:np.ndarray = np.array([valuations[0] <= action[0], action[1] <= valuations[1]])
+        return feedback
+    
+    def get_one_bit_feedback(self, index:int, action:np.ndarray[float, float])->bool:
+        # Return the feedback corresponding to the action (for now p=q)
+        valuations:np.ndarray = self.get_valuations(index)
+        feedback:bool = valuations[0] <= action[0] and action[1] <= valuations[1]
+        return feedback
+    
+    def get_turn_gft(self, index:int)->float:
+        # Compute the GFT for the given index
+        valuations:np.ndarray = self.get_valuations(index)
+        return valuations[1] - valuations[0]
     
     def get_best_expert(self)->tuple[tuple[float, float], float]:
         """
