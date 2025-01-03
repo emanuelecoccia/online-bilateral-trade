@@ -561,3 +561,12 @@ class PartitionedContexts(BaseAlgorithm):
                 feedback:np.ndarray[float, float] = self.environment.get_valuations(i)
                 if feedback[0] <= action and action <= feedback[1]:
                     self.gft += feedback[1] - feedback[0]
+
+# We do something ugly: we create some new names for a couple of classes, so that
+# they are consistent with my thesis. 
+
+class ExploitNearestNeighbor(FastEDLV2):
+    pass
+
+class ExploitFullInformation(EDLV):
+    pass
