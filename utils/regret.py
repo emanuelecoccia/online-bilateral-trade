@@ -66,7 +66,7 @@ def compute_scaling_laws_with_policy_regret(
             if adhoc_valuations:
                 max_gft = environment.get_policy_gft_having_adhoc_valuations()
             else:
-                _, max_gft = environment.get_policy_gft()
+                _, max_gft = environment.get_policy_gft() # much slower method, based on a sweeping algorithm
             regret = max_gft - algo_gft
             regret_values_for_T.append(regret)
         
