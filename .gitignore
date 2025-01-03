@@ -1,5 +1,4 @@
 linear_bandits/
 data/
-notebooks/
 *.pyc
 *.pkl

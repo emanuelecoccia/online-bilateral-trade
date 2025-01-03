@@ -1,6 +1,7 @@
 import numpy as np
 from environments.base import BaseEnvironment
 from environments.contextual import ContextualEnvironment
+from utils.data_structures import TwoDimensionalNode, TwoDimensionalTree
 from tqdm import tqdm
 
 class BaseAlgorithm:
@@ -270,11 +271,11 @@ class ContextualGFTMax(GFTMax):
         action:np.ndarray[float, float] = self.hedge_gft.choose_action()
         # Get valuations from the environment
         feedback:np.ndarray[float, float] = self.environment.get_valuations(i)
-        # Get constraints from the environment
+        # Get context from the environment
         s_dot:float
         b_dot:float
         s_dot, b_dot = self.environment.get_context(i)
-        # If action is outside the constraints, rescale actions
+        # If action is outside the context, rescale actions
         if action[0] < s_dot or b_dot < action[1]:
             action:np.ndarray[float, float] = self.rescale_action(action, s_dot, b_dot)
             # Update weights - hedge profit update is superfluous
@@ -310,24 +311,31 @@ class EDLV(BaseAlgorithm):
         The algorithm works by estimating the bounds on the current hidden valuations 
         from the past contexts.
         """
-        # For the first round, just guess (0.5, 0.5) and update the current GFT
-        # based on the feedback
+        # For the first round, just guess the central point on the diagonal, given the context 
+        # and update the current GFT based on the feedback
+        context:np.ndarray[float, float] = self.environment.get_context(0)
         feedback:np.ndarray[float, float] = self.environment.get_valuations(0)
-        if feedback[0] <= 0.5 and 0.5 <= feedback[1]:
+        action = (context[0] + context[1]) / 2
+        if feedback[0] <= action and action <= feedback[1]:
             self.gft += feedback[1] - feedback[0]
 
         # We iterate through the remaining T-1 turns
         for i in tqdm(range(1, self.T)):
-            constraints:np.ndarray[float, float] = self.environment.get_context(i)
-            # Find the distance of previous constraints to the current constraints
-            past_constraints:np.ndarray = self.environment.order_book[:i]
-            distances:np.ndarray = np.sqrt(np.sum((past_constraints - constraints)**2, axis = 1))
+            context:np.ndarray[float, float] = self.environment.get_context(i)
+            # Find the distance of previous context to the current context
+            past_context:np.ndarray = self.environment.order_book[:i]
+            distances:np.ndarray = np.sqrt(np.sum((past_context - context)**2, axis = 1))
             # Retrieve the past valuations and create upper and lower bounds
             past_valuations:np.ndarray = self.environment.valuation_sequence[:i]
             lower_bound_s:float = np.max(past_valuations[:, 0] - self.L * distances)
             upper_bound_s:float = np.min(past_valuations[:, 0] + self.L * distances)
             lower_bound_b:float = np.max(past_valuations[:, 1] - self.L * distances)
             upper_bound_b:float = np.min(past_valuations[:, 1] + self.L * distances)
+            # Use the context to refine the bounds
+            lower_bound_s = max(lower_bound_s, context[0])
+            upper_bound_s = min(upper_bound_s, context[1])
+            lower_bound_b = max(lower_bound_b, context[0])
+            upper_bound_b = min(upper_bound_b, context[1])
             # Take the point in the middle of the bounds, whether they cross or not
             p:float = (upper_bound_s + lower_bound_b) / 2
             q:float = p
@@ -337,6 +345,159 @@ class EDLV(BaseAlgorithm):
             if feedback[0] <= p and q <= feedback[1]:
                 self.gft += feedback[1] - feedback[0]
             
+            # Check if the valuations are within the bounds.
+            # It would be really weird if they did, it could only be explained 
+            # by some numerical rounding errors.
+            if feedback[0] < lower_bound_s:
+                print("Valuation s is below the lower bound:")
+                print(f"Hidden s:{feedback[0]}, lower bound: {lower_bound_s}\n")
+            if upper_bound_s < feedback[0]:
+                print("Valuation s is above the upper bound")
+                print(f"Hidden s:{feedback[0]}, upper bound: {upper_bound_s}\n")
+            if feedback[1] < lower_bound_b:
+                print("Valuation b is below the lower bound")
+                print(f"Hidden b:{feedback[1]}, lower bound: {lower_bound_b}\n")
+            if upper_bound_b < feedback[1]:
+                print("Valuation b is above the upper bound")
+                print(f"Hidden b:{feedback[1]}, upper bound: {upper_bound_b}\n")
+
+class FastEDLV(EDLV):
+    """
+    This class is a "hopefully" faster version of EDLV.
+    """
+    def run(self)->None:
+        # Initialize a tree
+        self.tree = TwoDimensionalTree()
+        # Set the radius
+        radius:float = 1/self.L
+        # For the first round, just guess the central point on the diagonal, given the context 
+        # and update the current GFT based on the feedback
+        context:np.ndarray[float, float] = self.environment.get_context(0)
+        feedback:np.ndarray[float, float] = self.environment.get_valuations(0)
+        action = (context[0] + context[1]) / 2
+        if feedback[0] <= action and action <= feedback[1]:
+            self.gft += feedback[1] - feedback[0]
+
+        # Store the data in the tree
+        self.tree.insert(TwoDimensionalNode(context[0], context[1], feedback))
+
+        # Iterate through the remaining turns
+        for i in tqdm(range(1, self.T)):
+            # Get the context
+            context:np.ndarray[float, float] = self.environment.get_context(i)
+            # Find the close contexts
+            close_nodes = self.tree.query(context[0], context[1], radius, i)
+
+            # If there are close nodes, we can estimate the bounds
+            if close_nodes:
+                # Find the distance of previous context to the current context
+                distances:np.ndarray = np.array([node.temporary_distance["distance"] for node in close_nodes\
+                                                        if node.temporary_distance["current_iteration"] == i])
+                # Retrieve the past valuations
+                valuations:np.ndarray = np.array([node.valuations for node in close_nodes])
+
+                # Create upper and lower bounds
+                lower_bound_s:float = np.max(valuations[:, 0] - self.L * distances)
+                upper_bound_s:float = np.min(valuations[:, 0] + self.L * distances)
+                lower_bound_b:float = np.max(valuations[:, 1] - self.L * distances)
+                upper_bound_b:float = np.min(valuations[:, 1] + self.L * distances)
+
+                # Use the context to refine the bounds
+                lower_bound_s = max(lower_bound_s, context[0])
+                upper_bound_s = min(upper_bound_s, context[1])
+                lower_bound_b = max(lower_bound_b, context[0])
+                upper_bound_b = min(upper_bound_b, context[1])
+
+                # Take the point in the middle of the bounds, whether they cross or not
+                p:float = (upper_bound_s + lower_bound_b) / 2
+                q:float = p
+                # Get valuations from the environment
+                feedback:np.ndarray[float, float] = self.environment.get_valuations(i)
+                # Insert the new node
+                self.tree.insert(TwoDimensionalNode(context[0], context[1], feedback))
+                # Update gft
+                if feedback[0] <= p and q <= feedback[1]:
+                    self.gft += feedback[1] - feedback[0]
+                
+                # Check if the valuations are within the bounds.
+                # It would be really weird if they did, it could only be explained 
+                # by some numerical rounding errors.
+                if feedback[0] < lower_bound_s:
+                    print("Valuation s is below the lower bound:")
+                    print(f"Hidden s:{feedback[0]}, lower bound: {lower_bound_s}\n")
+                if upper_bound_s < feedback[0]:
+                    print("Valuation s is above the upper bound")
+                    print(f"Hidden s:{feedback[0]}, upper bound: {upper_bound_s}\n")
+                if feedback[1] < lower_bound_b:
+                    print("Valuation b is below the lower bound")
+                    print(f"Hidden b:{feedback[1]}, lower bound: {lower_bound_b}\n")
+                if upper_bound_b < feedback[1]:
+                    print("Valuation b is above the upper bound")
+                    print(f"Hidden b:{feedback[1]}, upper bound: {upper_bound_b}\n")
+
+            else:
+                # If there are no close nodes, we just guess the central point on the diagonal
+                # and update the current GFT based on the feedback
+                action = (context[0] + context[1]) / 2
+                feedback:np.ndarray[float, float] = self.environment.get_valuations(i)
+                if feedback[0] <= action and action <= feedback[1]:
+                    self.gft += feedback[1] - feedback[0]
+                # Insert the new node
+                self.tree.insert(TwoDimensionalNode(context[0], context[1], feedback))
+
+
+class FastEDLV2(EDLV):
+    """
+    This is a faster version of FastEDLV.
+    We only retrieve the closest neighbor instead of 
+    all the neighbors within a certain radius.
+    """
+    def run(self)->None:
+        # Initialize a tree
+        self.tree = TwoDimensionalTree()
+        # For the first round, just guess the central point on the diagonal, given the context 
+        # and update the current GFT based on the feedback
+        context:np.ndarray[float, float] = self.environment.get_context(0)
+        feedback:np.ndarray[float, float] = self.environment.get_valuations(0)
+        action = (context[0] + context[1]) / 2
+        if feedback[0] <= action and action <= feedback[1]:
+            self.gft += feedback[1] - feedback[0]
+        
+        # Store the data in the tree
+        self.tree.insert(TwoDimensionalNode(context[0], context[1], feedback))
+
+        # Iterate through the remaining turns
+        # Iterate through the remaining turns
+        for i in tqdm(range(1, self.T)):
+            # Get the context
+            context:np.ndarray[float, float] = self.environment.get_context(i)
+            # Find the closest context
+            closest_neigh:TwoDimensionalNode
+            distance:float
+            closest_neigh, distance = self.tree.find_nearest_neighbor(context[0], context[1])
+            # Create upper and lower bounds
+            lower_bound_s:float = closest_neigh.valuations[0] - self.L * distance
+            upper_bound_s:float = closest_neigh.valuations[0] + self.L * distance
+            lower_bound_b:float = closest_neigh.valuations[1] - self.L * distance
+            upper_bound_b:float = closest_neigh.valuations[1] + self.L * distance
+
+            # Use the context to refine the bounds
+            lower_bound_s = max(lower_bound_s, context[0])
+            upper_bound_s = min(upper_bound_s, context[1])
+            lower_bound_b = max(lower_bound_b, context[0])
+            upper_bound_b = min(upper_bound_b, context[1])
+
+            # Take the point in the middle of the bounds, whether they cross or not
+            p:float = (upper_bound_s + lower_bound_b) / 2
+            q:float = p
+            # Get valuations from the environment
+            feedback:np.ndarray[float, float] = self.environment.get_valuations(i)
+            # Insert the new node
+            self.tree.insert(TwoDimensionalNode(context[0], context[1], feedback))
+            # Update gft
+            if feedback[0] <= p and q <= feedback[1]:
+                self.gft += feedback[1] - feedback[0]
+
             # Check if the valuations are within the bounds.
             # It would be really weird if they did, it could only be explained 
             # by some numerical rounding errors.
