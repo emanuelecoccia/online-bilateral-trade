@@ -1,24 +1,5 @@
 import numpy as np
-from typing import Union, Tuple
-
-def construct_sequence_with_lipschitz_valuations(T:int, Lipschitz_constant:float)\
-    ->Tuple[np.ndarray, np.ndarray]:
-    """
-    This function constructs a sequence of valuations and a sequence of contexts,
-    such that the valuations are Lipschitz continuous with respect to the contexts.
-    """
-    s_dot = np.random.random(size=T)
-    b_dot = np.random.random(size=T)
-    s = np.zeros(T)
-    b = np.zeros(T)
-    for t in range(T):
-        if s_dot[t] > b_dot[t]:
-            s_dot[t], b_dot[t] = b_dot[t], s_dot[t]
-
-    s, b = sinusoidal_function(s_dot, b_dot, Lipschitz_constant)
-    contexts = np.stack([s_dot, b_dot], axis=1)
-    valuations = np.stack([s, b], axis=1)
-    return contexts, valuations
+from typing import Union, Tuple, Callable
 
 def sinusoidal_function(s_dot:Union[float, np.ndarray], b_dot:Union[float, np.ndarray], Lipschitz_constant:float)\
     ->Union[Tuple[float, float], Tuple[np.ndarray, np.ndarray]]:
@@ -43,6 +24,25 @@ def triangle_wave_function(s_dot:Union[float, np.ndarray], b_dot:Union[float, np
     s = s_dot + triangle_residual * (b_dot - s_dot) * 0.75
     b = s + (b_dot - s_dot) * 0.25
     return s, b
+
+def construct_sequence_with_lipschitz_valuations(T:int, Lipschitz_constant:float, Lipschitz_function:Callable=sinusoidal_function)\
+    ->Tuple[np.ndarray, np.ndarray]:
+    """
+    This function constructs a sequence of valuations and a sequence of contexts,
+    such that the valuations are Lipschitz continuous with respect to the contexts.
+    """
+    s_dot = np.random.random(size=T)
+    b_dot = np.random.random(size=T)
+    s = np.zeros(T)
+    b = np.zeros(T)
+    for t in range(T):
+        if s_dot[t] > b_dot[t]:
+            s_dot[t], b_dot[t] = b_dot[t], s_dot[t]
+
+    s, b = Lipschitz_function(s_dot, b_dot, Lipschitz_constant)
+    contexts = np.stack([s_dot, b_dot], axis=1)
+    valuations = np.stack([s, b], axis=1)
+    return contexts, valuations
 
 def construct_logarithmic_lower_bound(T:int, Lipschitz_constant:float)\
     ->Tuple[np.ndarray, np.ndarray]:
