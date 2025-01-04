@@ -1,1 +1,4 @@
 linear_bandits/
+data/
+*.pyc
+*.pkl
