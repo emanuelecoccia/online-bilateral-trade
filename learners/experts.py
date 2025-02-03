@@ -527,8 +527,13 @@ class PartitionedContexts(BaseAlgorithm):
         self.environment:ContextualEnvironment = environment
         self.L:float = L
         self.epsilon = self.L**(2/3) * self.T**(-1/3)
-        self.grid_size = np.ceil(self.L/self.epsilon)
-        self.L_grid:np.ndarray[float] = - np.ones((self.grid_size, self.grid_size)) # -1 means no data
+        self.grid_size = np.ceil(self.L/self.epsilon).astype(int)
+        # -1 means no data
+        # Small note: we add one cell because 0 and 1 are included, 
+        # so technically we could observe a coordinate of the context being equal to 1
+        # and that is not consistent with the grid size which is exclusive 
+        # (to find the region we take the floor)
+        self.L_grid:np.ndarray[float] = - np.ones((self.grid_size+1, self.grid_size+1)) 
         self.gft:float = 0
 
     def get_final_gft(self)->float:
@@ -543,19 +548,20 @@ class PartitionedContexts(BaseAlgorithm):
             # If the region has no data, we save 
             # the orthogonal projection of the valuations
             # onto the main diagonal
-            action:float = self.L_grid[region]
+            action:float = self.L_grid[region[0], region[1]]
             if action == -1:
                 # Guess the action by projecting the context onto the main diagonal
                 action:float = (context[0] + context[1]) / 2
                 # Get feedback
                 feedback:np.ndarray[float, float] = self.environment.get_valuations(i)
-                # Project the actual valuations onto the main diagonal
-                projection:float = (feedback[0] + feedback[1]) / 2
-                # Save them
-                self.L_grid[region] = projection
                 # Update gft
                 if feedback[0] <= action and action <= feedback[1]:
                     self.gft += feedback[1] - feedback[0]
+                # Project the actual valuations onto the main diagonal
+                projection:float = (feedback[0] + feedback[1]) / 2
+                # Save it
+                self.L_grid[region[0], region[1]] = projection
+                
             # If the region has data already, we exploit it
             else:
                 feedback:np.ndarray[float, float] = self.environment.get_valuations(i)
@@ -565,7 +571,7 @@ class PartitionedContexts(BaseAlgorithm):
 # We do something ugly: we create some new names for a couple of classes, so that
 # they are consistent with my thesis. 
 
-class ExploitNearestNeighbor(FastEDLV2):
+class ExploitNearestContext(FastEDLV2):
     pass
 
 class ExploitFullInformation(EDLV):

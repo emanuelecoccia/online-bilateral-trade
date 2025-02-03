@@ -4,7 +4,7 @@ from environments.base import BaseEnvironment
 from environments.contextual import ContextualEnvironment
 from learners.experts import BaseAlgorithm
 from .valuations import construct_sequence_with_lipschitz_valuations
-from typing import Tuple, List
+from typing import Tuple, List, Callable
 from tqdm import tqdm
 
 def compute_scaling_laws(
@@ -34,7 +34,7 @@ def compute_scaling_laws(
 
 def compute_scaling_laws_with_policy_regret(
         Algorithm:BaseAlgorithm, Environment:ContextualEnvironment, 
-        T_horizons:list[int], Lipschitz_constants:list[float], sequence_constructor=None,
+        T_horizons:list[int], Lipschitz_constants:list[float], sequence_constructor:Callable=None,
         adhoc_valuations:bool=True, *args, **kwargs
         )->Tuple[list[int], list[int], list[list[float]]]:
     """
@@ -52,7 +52,7 @@ def compute_scaling_laws_with_policy_regret(
             # Create environment based on variables found
             if sequence_constructor:
                 # Construct the sequence of valuations from the given constructor
-                contexts, valuations = sequence_constructor(T, L)
+                contexts, valuations = sequence_constructor(T, L, kwargs["Lipschitz_function"])
                 environment = Environment(T, contexts, valuations)
             else:
                 environment = Environment(T)
