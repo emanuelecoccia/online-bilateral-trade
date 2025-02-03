@@ -1,6 +1,16 @@
 import numpy as np
 from typing import Union, Tuple, Callable
 
+def easy_function(s_dot:Union[float, np.ndarray], b_dot:Union[float, np.ndarray], *args, **qwargs)\
+    ->Union[Tuple[float, float], Tuple[np.ndarray, np.ndarray]]:
+    """
+    This function generates a simple function that is Lipschitz with respect to the context.
+    It returns a pair of private valuations.
+    """
+    s = s_dot + 0.6 * (b_dot - s_dot)
+    b = s + 0.2 * (b_dot - s_dot)
+    return s, b
+
 def sinusoidal_function(s_dot:Union[float, np.ndarray], b_dot:Union[float, np.ndarray], Lipschitz_constant:float)\
     ->Union[Tuple[float, float], Tuple[np.ndarray, np.ndarray]]:
     """
@@ -19,14 +29,15 @@ def triangle_wave_function(s_dot:Union[float, np.ndarray], b_dot:Union[float, np
     that is Lipschitz with respect to the context.
     It returns a pair of private valuations.
     """
-    triangle_residual = 2*np.abs(s_dot*0.5*Lipschitz_constant-int(s_dot*0.5*Lipschitz_constant+0.5))\
-        * 2*np.abs(b_dot*0.5*Lipschitz_constant-int(b_dot*0.5*Lipschitz_constant+0.5))
+    triangle_residual = 2*np.abs(s_dot*0.5*Lipschitz_constant-np.floor(s_dot*0.5*Lipschitz_constant+0.5))\
+        * 2*np.abs(b_dot*0.5*Lipschitz_constant-np.floor(b_dot*0.5*Lipschitz_constant+0.5))
     s = s_dot + triangle_residual * (b_dot - s_dot) * 0.75
     b = s + (b_dot - s_dot) * 0.25
     return s, b
 
-def construct_sequence_with_lipschitz_valuations(T:int, Lipschitz_constant:float, Lipschitz_function:Callable=sinusoidal_function)\
-    ->Tuple[np.ndarray, np.ndarray]:
+def construct_sequence_with_lipschitz_valuations(T:int, Lipschitz_constant:float, 
+                                                 Lipschitz_function:Callable=sinusoidal_function, *args, **kwargs)\
+                                                 ->Tuple[np.ndarray, np.ndarray]:
     """
     This function constructs a sequence of valuations and a sequence of contexts,
     such that the valuations are Lipschitz continuous with respect to the contexts.
@@ -44,7 +55,62 @@ def construct_sequence_with_lipschitz_valuations(T:int, Lipschitz_constant:float
     valuations = np.stack([s, b], axis=1)
     return contexts, valuations
 
-def construct_logarithmic_lower_bound(T:int, Lipschitz_constant:float)\
+def construct_sqrt_lower_bound(T:int, Lipschitz_constant:float, *args, **kwargs)\
+    ->Tuple[np.ndarray, np.ndarray]:
+    """
+    This function constructs a sequence of valuations and a sequence of contexts,
+    such that the valuations are Lipschitz continuous with respect to the contexts.
+    And the regret lower bound is O(L sqrt(T)).
+    """
+    # Contexts are inside the square (0, 1)-(0.25, 0.75)
+    # inside a grid of size ceil(sqrt(T)) x ceil(sqrt(T))
+    # chosen boustrophedon.
+    m = int(np.ceil(np.sqrt(T)))
+    counter = 0
+    row = 0
+    contexts = []
+    while row < m and counter < T:
+        col = 0
+        while col < m and counter < T:
+            # s and b bounded between 0 and m-1
+            if row % 2 == 0:
+                s_dot = col
+                b_dot = m-row-1
+            else:
+                s_dot = m-col-1
+                b_dot = m-row-1
+            # Rescale the contexts to be inside the square
+            s_dot = (s_dot + 0.5)/m * 0.25
+            b_dot = 0.75 + (b_dot + 0.5)/m * 0.25
+            # Append the context
+            contexts.append(np.array([s_dot, b_dot]))
+            col += 1
+            counter += 1
+        row += 1
+
+    # Convert the list to numpy array
+    contexts = np.array(contexts)
+
+    # The valuations are chosen at random during odd turns
+    # and at 0.5 and 0.5 during even turns
+    EPSILON = 1e-5
+    valuations = np.zeros((T, 2))
+    for t in range(T):
+        s = 0.5
+        b = 0.5
+        if t % 2 == 0: # odd turn
+            if np.random.randint(2) == 1:
+                s = s + EPSILON - min(0.25*Lipschitz_constant/m, 0.25)
+                b = b - EPSILON
+            else:
+                s = s + EPSILON
+                b = b - EPSILON + min(0.25*Lipschitz_constant/m, 0.25)
+        valuations[t] = np.array([s, b])
+
+    return contexts, valuations
+
+
+def construct_logarithmic_lower_bound(T:int, Lipschitz_constant:float, *args, **kwargs)\
     ->Tuple[np.ndarray, np.ndarray]:
     """
     This function constructs a sequence of valuations and a sequence of contexts,
@@ -123,7 +189,7 @@ def construct_logarithmic_lower_bound(T:int, Lipschitz_constant:float)\
     return actual_contexts, valuation_sequence
 
 
-def contruct_Lsq_logT_lower_bound(T:int, Lipschitz_constant:float)\
+def construct_Lsq_logT_lower_bound(T:int, Lipschitz_constant:float, *args, **kwargs)\
     ->Tuple[np.ndarray, np.ndarray]:
     """
     This function constructs a sequence of valuations and a sequence of contexts,
@@ -195,3 +261,5 @@ def contruct_Lsq_logT_lower_bound(T:int, Lipschitz_constant:float)\
     rescaled_s = actual_contexts[:, 0] + valuation_sequence[:, 0] * scaling_factors
     rescaled_b = actual_contexts[:, 1] - (1 - valuation_sequence[:, 1]) * scaling_factors
     valuation_sequence = np.vstack([rescaled_s, rescaled_b]).T
+
+    return actual_contexts, valuation_sequence
