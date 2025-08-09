@@ -188,3 +188,34 @@ class OrderBookEnvironment(ContextualEnvironment, SimpleBilateralEnvironment):
             max_reward_tuples[tuple(context)] = max_reward_tuple
 
         return max_reward_tuples, cumulative_max_reward
+
+
+class LipschitzOrderBookEnvironment:
+    def __init__(self, T:int, order_book:np.ndarray, valuation_sequence:np.ndarray)->None:
+        """
+        This class adds the order book to the DummyEnvironment.
+        The order book is a multi-dimensional vector.
+        """
+        self.T = T
+        assert order_book.shape[0] > order_book.shape[1]
+        assert order_book.shape[1] >= 1
+        assert order_book.shape[2] == 2
+        
+        self.order_book = order_book
+        self.valuation_sequence = valuation_sequence
+        self.d = self.order_book.shape[1]
+        
+    def get_context(self, index:int)->np.ndarray:
+        """
+        This function returns the constraints at the given time.
+        """
+        return self.order_book[index]
+    
+    def get_policy_gft(self)->float:
+        """
+        This function calculates the policy regret when the valuations are deterministic
+        and are a Lipschitz function of the context vector.
+        So we just need to sum the GFT of each turn.
+        BEWARE: we assume that the valuations have the constraint that b >= s.
+        """
+        return np.sum(self.valuation_sequence[:, 1] - self.valuation_sequence[:, 0])
