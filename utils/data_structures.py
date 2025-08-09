@@ -309,13 +309,13 @@ Each node has certain attributes or states that must be stored (override the cla
 """
 
 class NNode:
-    def __init__(self, d: int, parent: Self | None, boundaries: np.ndarray):
+    def __init__(self, d: int, parent: Self | None, boundaries: np.ndarray) -> None:
         self.d = d
         self.parent = parent
         self.boundaries = boundaries
         self.children: dict[int, Self] = {}
 
-    def get_child(self, coordinates: np.ndarray):
+    def get_child(self, coordinates: np.ndarray) -> Self:
         d = coordinates.shape[0]
         assert self.boundaries.shape == (d, 2)
 
@@ -332,28 +332,43 @@ class NNode:
             upper = np.where(child_index, self.boundaries[:, 1], pivots)
             child_boundaries = np.stack([lower, upper], axis=1) # shape (d, 2)
 
-            child_node = NNode(d = self.d, parent = self, boundaries = child_boundaries)
+            child_node = NNode(d=self.d, parent=self, boundaries=child_boundaries)
             self.children[child_index_bits] = child_node
             return child_node
 
 class NTree:
-    def __init__(self, d: int):
+    def __init__(self, d: int) -> None:
         self.d = d
         unit_boundaries = np.stack([np.zeros(self.d), np.ones(self.d)], axis=1) # shape (d, 2)
-        self.root = NNode(d = self.d, parent = None, boundaries = unit_boundaries)
+        self.root = NNode(d=self.d, parent=None, boundaries=unit_boundaries)
 
 
 """
-Modified tree for the algorithm "Conquer and Divide"
+Modified node for the algorithm "Conquer and Divide"
 """
 
-class NNodeDC(NNode):
-    def __init__(self, d: int, parent: Self | None, boundaries: np.ndarray):
+class NNodeConquerDivide(NNode):
+    def __init__(self, d: int, parent: Self | None, boundaries: np.ndarray) -> None:
         super().__init__(d=d, parent=parent, boundaries=boundaries)
         # Adding other attributes for keeping track of the two subroutines
         self.p_solution: float | None = None
         self.is_routine_one_on: bool = True
-        self.is_routine_two_on: bool = False
         self.price_boundary_index_a: int | None = None
         self.price_boundary_index_b: int | None = None
         self.current_index_routine_one: int | None = None
+
+class NTreeConquerDivide(NTree):
+    def __init__(self, d: int, K: int) -> None:
+        self.d = d
+        self.K = K
+        unit_boundaries = np.stack([np.zeros(self.d), np.ones(self.d)], axis=1) # shape (d, 2)
+        self.root = NNodeConquerDivide(d=self.d, parent=None, boundaries=unit_boundaries)
+        self.root.price_boundary_index_a = 0
+        self.root.price_boundary_index_b = self.K
+        self.root.current_index_routine_one = 0
+
+    def get_node(self, context: np.ndarray) -> NNodeConquerDivide:
+        node = self.root
+        while node.p_solution:
+            node = node.get_child(coordinates=context)
+        return node
