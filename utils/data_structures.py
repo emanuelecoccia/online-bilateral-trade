@@ -332,7 +332,7 @@ class NNode:
             upper = np.where(child_index, self.boundaries[:, 1], pivots)
             child_boundaries = np.stack([lower, upper], axis=1) # shape (d, 2)
 
-            child_node = NNode(d=self.d, parent=self, boundaries=child_boundaries)
+            child_node = type(self)(d=self.d, parent=self, boundaries=child_boundaries)
             self.children[child_index_bits] = child_node
             return child_node
 
@@ -369,6 +369,6 @@ class NTreeConquerDivide(NTree):
 
     def get_node(self, context: np.ndarray) -> NNodeConquerDivide:
         node = self.root
-        while node.p_solution:
+        while node.p_solution is not None:
             node = node.get_child(coordinates=context)
         return node
